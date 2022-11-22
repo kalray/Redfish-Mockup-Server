@@ -669,11 +669,19 @@ class RfMockupServer(BaseHTTPRequestHandler):
 
                             self.patchedLinks[newfpath] = data_received
                             self.patchedLinks[fpath] = payload
-                            self.send_response(204)
-                            self.send_header("Location", newpath)
-                            self.send_header("Content-Length", "0")
-                            self.end_headers()
-
+                            if self.path == '/redfish/v1/SessionService/Sessions':
+                                encoded_data = json.dumps(data_received, sort_keys=True, indent=4, separators=(",", ": ")).encode()
+                                self.send_response(201)
+                                self.send_header("Location", newpath)
+                                self.send_header("X-Auth-Token", "ffffffff")
+                                self.send_header("Content-Length", len(encoded_data))
+                                self.end_headers()
+                                self.wfile.write(encoded_data)
+                            else:
+                                self.send_response(204)
+                                self.send_header("Location", newpath)
+                                self.send_header("Content-Length", 0)
+                                self.end_headers()
                     # Actions framework
                     else:
                         # SubmitTestEvent

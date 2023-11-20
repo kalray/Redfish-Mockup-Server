@@ -14,6 +14,7 @@ import json
 import threading
 import datetime
 import signal
+import uuid
 
 import grequests
 
@@ -127,16 +128,19 @@ class RfMockupServer(BaseHTTPRequestHandler):
                     if k.lower() not in dont_send:
                         self.send_header(k, v)
 
-        def add_new_member(self, payload, data_received):
+        def add_new_member(self, payload, data_received, path=None):
+            if not path:
+                path = self.path
+
             members = payload.get('Members')
             n = 1
-            pattern = re.sub(r'\d+$', '{id}', members[0].get('@odata.id').replace(self.path, '').strip('/')) if len(members) else 'Member{id}'
+            pattern = re.sub(r'\d+$', '{id}', members[0].get('@odata.id').replace(path, '').strip('/')) if len(members) else 'Member{id}'
             newpath_id = data_received.get('Id', pattern.format(id=n))
-            newpath = '/'.join([ self.path, newpath_id ])
+            newpath = '/'.join([ path, newpath_id ])
             while newpath in [m.get('@odata.id') for m in members]:
                 n = n + 1
                 newpath_id = data_received.get('Id', pattern.format(id=n))
-                newpath = '/'.join([ self.path, newpath_id ])
+                newpath = '/'.join([ path, newpath_id ])
             members.append({'@odata.id': newpath})
             data_received['@odata.id'] = newpath
             data_received['Id'] = newpath_id
@@ -292,6 +296,42 @@ class RfMockupServer(BaseHTTPRequestHandler):
                 else:
                     return (400)
 
+        def handle_simpleupdate(self, data_received):
+            """Mockup for SimpleUpdate, creates a new Task for each target"""
+            for target_num,_ in enumerate(data_received["Targets"]):
+                taskcoll_path = self.construct_path('/redfish/v1/TaskService/Tasks', 'index.json')
+                success, taskcoll = self.get_cached_link(taskcoll_path)
+                if not success:
+                    return (400, "")
+
+                # Create new mockup Task
+                task = {}
+                task["Name"] = f"Firmware Update target {str(target_num)}"
+                task["PercentComplete"] = "1"
+                task["TaskState"] = "Running"
+                task["Id"] = str(uuid.uuid4())
+
+                def _update_task(task):
+                    """Update the task status until completed"""
+                    time.sleep(1)
+                    while int(task['PercentComplete']) != 100:
+                        task['PercentComplete'] = str(int(task['PercentComplete']) + 1)
+                        time.sleep(0.2)
+                    task['TaskState'] = "Completed"
+
+                task_path = self.add_new_member(taskcoll, task, path="/redfish/v1/TaskService/Tasks")
+                self.patchedLinks[taskcoll_path] = taskcoll
+                self.patchedLinks[task_path] = task
+
+                # Spawn a thread to update the task
+                threading.Thread(target=_update_task, args=[self.patchedLinks[task_path]], daemon=True).start()
+
+                encoded_data = json.dumps(task, sort_keys=True).encode()
+                self.wfile.write(encoded_data)
+                return (202, task_path)
+
+            return (400, "")
+
         server_version = "RedfishMockupHTTPD_v" + tool_version
         event_id = 1
 
@@ -428,6 +468,10 @@ class RfMockupServer(BaseHTTPRequestHandler):
             fpath_direct = self.construct_path(self.path, '')
 
             success, payload = self.get_cached_link(fpath)
+
+            # If fpath fails, try to check path (for in-memory objects)
+            if not success:
+                success, payload = self.get_cached_link(self.path)
 
             scheme, netloc, path, params, query, fragment = urlparse(self.path)
             query_pieces = parse_qs(query, keep_blank_values=True)
@@ -692,6 +736,11 @@ class RfMockupServer(BaseHTTPRequestHandler):
                         elif 'TelemetryService/Actions/TelemetryService.SubmitTestMetricReport' in self.path:
                             r_code = self.handle_telemetry(data_received)
                             self.send_response(r_code)
+                        elif 'UpdateService/Actions/SimpleUpdate' in self.path:
+                            r_code,location = self.handle_simpleupdate(data_received)
+                            self.send_response(r_code)
+                            self.send_header("Location", location)
+                            self.end_headers()
                         # All other actions (no data checking or response data)
                         elif '/Actions/' in self.path:
                             fpath = self.construct_path(self.path.split('/Actions/', 1)[0], 'index.json')

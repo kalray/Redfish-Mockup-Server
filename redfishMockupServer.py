@@ -468,7 +468,7 @@ class RfMockupServer(BaseHTTPRequestHandler):
                     self.send_header("OData-Version", "4.0")
 
                 # Strip the @Redfish.Copyright property
-                output_data = payload
+                output_data = payload.copy()
                 output_data.pop("@Redfish.Copyright", None)
 
                 # Query Subscriptions should not return HttpHeaders.

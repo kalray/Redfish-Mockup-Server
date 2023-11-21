@@ -326,8 +326,6 @@ class RfMockupServer(BaseHTTPRequestHandler):
                 # Spawn a thread to update the task
                 threading.Thread(target=_update_task, args=[self.patchedLinks[task_path]], daemon=True).start()
 
-                encoded_data = json.dumps(task, sort_keys=True).encode()
-                self.wfile.write(encoded_data)
                 return (202, task_path)
 
             return (400, "")
@@ -740,7 +738,6 @@ class RfMockupServer(BaseHTTPRequestHandler):
                             r_code,location = self.handle_simpleupdate(data_received)
                             self.send_response(r_code)
                             self.send_header("Location", location)
-                            self.end_headers()
                         # All other actions (no data checking or response data)
                         elif '/Actions/' in self.path:
                             fpath = self.construct_path(self.path.split('/Actions/', 1)[0], 'index.json')

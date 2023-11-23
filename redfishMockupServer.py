@@ -672,8 +672,12 @@ class RfMockupServer(BaseHTTPRequestHandler):
                         try:
                             data_received = json.loads(self.rfile.read(lenn).decode("utf-8"))
                         except ValueError:
-                            print ('Decoding JSON has failed, sending 400')
-                            data_received = None
+                            if 'multipart/form-data' in self.headers["content-type"]:
+                                print("File upload (without JSON)")
+                                data_received = {}
+                            else:
+                                print ('Decoding JSON has failed, sending 400')
+                                data_received = None
                 else:
                     self.send_response(411)
                     self.end_headers()
@@ -693,7 +697,22 @@ class RfMockupServer(BaseHTTPRequestHandler):
                     #   204 if success
                     #   404 if no file present
                     if success:
-                        if payload.get('Members') is None:
+                        if 'UpdateService' in self.path:
+                            updateserv_path = self.construct_path('/redfish/v1/UpdateService', 'index.json')
+                            ret, updateserv = self.get_cached_link(updateserv_path)
+                            if ret:
+                                # Add targets to HttpPushUriTargets
+                                # FIXME: Don't hardcode those and get them from file?
+                                updateserv['HttpPushUriTargets'] = ["/redfish/v1/Managers/IOM1", "/redfish/v1/Managers/IOM2"]
+
+                                encoded_data = json.dumps(updateserv, sort_keys=True).encode()
+                                self.send_response(200)
+                                self.end_headers()
+                                self.wfile.write(encoded_data)
+                            else:
+                                self.send_response(400)
+
+                        elif payload.get('Members') is None:
                             self.send_response(405)
                         else:
                             logger.info(data_received)
